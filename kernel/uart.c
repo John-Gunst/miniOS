@@ -1,28 +1,120 @@
-/* kernel/uart.c - minimal ns16550 write (polling) for QEMU virt */
-#include "console.h"
 #include <stdint.h>
+#include <stdarg.h>
+#include "uart.h"
+#include "common.h"
 
-#define UART0_BASE 0x10000000UL
-/* 16550 registers offsets */
-#define UART_THR 0x00
-#define UART_LSR 0x05
-#define UART_LSR_THRE 0x20
+#define UART_BASE   0x10000000u
+#define UART_THR    0u   /* transmit holding */
+#define UART_LSR    5u   /* line status */
+#define UART_LSR_THRE (1u << 5) /* transmit-hold-register empty */
 
-static inline void mmio_write(uintptr_t addr, uint8_t val) {
-    *(volatile uint8_t *)addr = val;
-}
-static inline uint8_t mmio_read(uintptr_t addr) {
-    return *(volatile uint8_t *)addr;
-}
-
-void console_putc(char c) {
-    /* wait for THR empty */
-    while ((mmio_read(UART0_BASE + UART_LSR) & UART_LSR_THRE) == 0) ;
-    mmio_write(UART0_BASE + UART_THR, (uint8_t)c);
+static inline volatile uint8_t *uart_reg(unsigned offset)
+{
+    return (volatile uint8_t *)(UART_BASE + offset);
 }
 
-void console_puts(const char *s) {
+void uart_init(void)
+{
+    /* Minimal init: 8N1, enable FIFO.
+       On QEMU virt this is enough to talk over serial. */
+    volatile uint8_t *lcr = uart_reg(3);
+    volatile uint8_t *fcr = uart_reg(2);
+
+    *lcr = 0x03;   /* 8 data bits, 1 stop, no parity */
+    *fcr = 0x01;   /* enable FIFO */
+}
+
+void uart_putc(char c)
+{
+    volatile uint8_t *thr = uart_reg(UART_THR);
+    volatile uint8_t *lsr = uart_reg(UART_LSR);
+
+    /* Wait until THR empty */
+    while ((*lsr & UART_LSR_THRE) == 0)
+        ;
+
+    *thr = (uint8_t)c;
+}
+
+void uart_puts(const char *s)
+{
     while (*s) {
-        if (*s == '\n') console_putc('\r');
-        console_putc(*s++);
+        if (*s == '\n')
+            uart_putc('\r');
+        uart_putc(*s++);
     }
+}
+
+/* Very small printf clone: supports %s, %d, %x */
+static void uart_print_uint(unsigned value, unsigned base)
+{
+    char buf[16];
+    unsigned i = 0;
+
+    if (value == 0) {
+        uart_putc('0');
+        return;
+    }
+
+    while (value && i < sizeof(buf)) {
+        unsigned digit = value % base;
+        value /= base;
+        buf[i++] = (digit < 10) ? ('0' + digit) : ('a' + digit - 10);
+    }
+
+    while (i--)
+        uart_putc(buf[i]);
+}
+
+void uart_printf(const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+
+    while (*fmt) {
+        if (*fmt != '%') {
+            uart_putc(*fmt++);
+            continue;
+        }
+
+        fmt++;
+        if (!*fmt)
+            break;
+
+        switch (*fmt) {
+        case 's': {
+            const char *s = va_arg(ap, const char *);
+            if (!s) s = "(null)";
+            uart_puts(s);
+        } break;
+        case 'd': {
+            int val = va_arg(ap, int);
+            if (val < 0) {
+                uart_putc('-');
+                val = -val;
+            }
+            uart_print_uint((unsigned)val, 10);
+        } break;
+        case 'x': {
+            unsigned val = va_arg(ap, unsigned);
+            uart_print_uint(val, 16);
+        } break;
+        case 'c': {
+            int c = va_arg(ap, int);
+            uart_putc((char)c);
+        } break;
+        case '%':
+            uart_putc('%');
+            break;
+        default:
+            uart_putc('%');
+            uart_putc(*fmt);
+            break;
+        }
+
+        fmt++;
+    }
+
+    va_end(ap);
+}
+
