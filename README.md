@@ -38,6 +38,5 @@ It’s intentionally small but demonstrates the core OS features listed in the a
 
 ### Dependencies (Debian/Ubuntu lab machine)
 
-```bash
-sudo apt update
-sudo apt install qemu-system-misc gcc-riscv64-unknown-elf
+make
+qemu-system-riscv32 -machine virt -nographic -bios none -kernel kernel.elf
