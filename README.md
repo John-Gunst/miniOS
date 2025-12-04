@@ -37,6 +37,5 @@ It’s intentionally small but demonstrates the core OS features listed in the a
 ## Build & Run (QEMU virt, RISC-V 32-bit)
 
 ### Dependencies (Debian/Ubuntu lab machine)
-
-make
-qemu-system-riscv32 -machine virt -nographic -bios none -kernel kernel.elf
+  - make
+  - qemu-system-riscv32 -machine virt -nographic -bios none -kernel kernel.elf
